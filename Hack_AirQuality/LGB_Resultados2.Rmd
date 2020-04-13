@@ -1,0 +1,378 @@
+---
+title: "Hackaton: Urban Air Pollution Challenge"
+subtitle: "Modelos LightGBM"
+author: "Edimer David Jaramillo"
+output:
+  html_document:
+    css: estilo.css
+    toc: true
+    code_foldin: hide
+    highlight: pygments
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+```
+
+# Cargando `reticulate`
+
+```{r}
+library(reticulate)
+```
+
+## Submission 34 (Cross Validation)
+
+```{python}
+# Importando bibliotecas
+import pandas as pd
+import lightgbm as lgb
+import numpy as np
+from sklearn.model_selection import train_test_split
+
+# === Train === #
+nombres_train = pd.read_csv('data/nombres_python2.csv',
+                       header=None, sep=',')
+df_train = pd.read_csv('data/Train3_sin_impute.csv', names = nombres_train[0],
+                       header=None, sep=',', encoding = "latin",)[1:]
+                       
+cols1 = df_train.columns.drop(["day_week", "month_date", "Weekend"])
+
+df_trainC = df_train
+
+df_trainC[cols1] = df_trainC[cols1].apply(pd.to_numeric, errors='coerce')
+
+# ==== Test === #
+nombres_test = pd.read_csv('data/nombres_python_test2.csv',
+                       header=None, sep=',')
+df_test = pd.read_csv('data/Test3_sin_impute.csv', names = nombres_test[0],
+                       header=None, sep=',', encoding = "latin",)[1:] 
+
+df_testC = df_test
+                          
+cols = df_testC.columns.drop(['Place_ID_Date', "day_week", "month_date", "Weekend"])
+df_testC[cols] = df_testC[cols].apply(pd.to_numeric, errors='coerce')   
+
+# Convirtiendo en enteros (int) los datos tipo string
+df_trainC["day_week"] = df_trainC["day_week"].astype(int)
+df_trainC["month_date"] = df_trainC["month_date"].astype(int)
+df_trainC["Weekend"] = df_trainC["Weekend"].astype(int)
+
+df_testC["day_week"] = df_testC["day_week"].astype(int)
+df_testC["month_date"] = df_testC["month_date"].astype(int)
+df_testC["Weekend"] = df_testC["Weekend"].astype(int)
+
+# === Split data ==== #
+df_train3, df_test3 = train_test_split(df_trainC, test_size = 0.3, random_state = 123)
+
+# ==== Entrenamiendo de modelo ==== #
+y_train = np.log(df_train3["target"])
+y_test = np.log(df_test3["target"])
+X_train = df_train3.drop("target", axis=1)
+X_test = df_test3.drop("target", axis=1)
+
+# === Dataset lgb, igual que para XGBoost === #
+lgb_train = lgb.Dataset(X_train, y_train)
+lgb_eval = lgb.Dataset(X_test, y_test, reference=lgb_train)
+```
+
+## Subm 35
+
+```{python}
+# === Configuration of parameters === #
+params = {
+    'boosting_type': 'gbdt',
+    'objective': 'regression',
+    'metric': {'rmse'},
+    'num_leaves': 80,
+    'learning_rate': 0.001,
+    'feature_fraction': 0.8,
+    'bagging_fraction': 0.8,
+    'bagging_freq': 5,
+    'verbose': 0,
+    'max_depth': 10,
+    'max_bin': 500
+}
+
+# Cross Validation
+print('Starting training...')
+gbm_cv = lgb.cv(params,
+                lgb_train,
+                num_boost_round=5000,
+                early_stopping_rounds=5,
+                nfold=10,
+                stratified=False,
+                seed=123,
+                categorical_feature=["day_week", "month_date", "Weekend"])
+best_round = len(gbm_cv['rmse-mean'])
+
+# Modelo con mejor rounds (best_rounds)
+gbm = lgb.train(params,
+                lgb_train,
+                num_boost_round=best_round,
+                valid_sets=lgb_eval,
+                early_stopping_rounds=5,
+                categorical_feature=["day_week", "month_date", "Weekend"])
+
+# === Predicciones === #
+print('Starting predict...')
+predichos = gbm.predict(data=df_testC.drop(["Place_ID_Date", "Date", "Place_ID"], axis = 1))
+predichos = np.exp(predichos)
+predichos
+
+# === Exportando predicciones === #  
+mi_array = {'Place_ID_Date': df_testC['Place_ID_Date'],
+            'target': predichos}
+          
+subm35 = pd.DataFrame(data = mi_array)
+subm35.to_csv('submissions/Subm35.csv', index = False, header=True)
+```
+
+## Subm 36
+
+```{python}
+# === Configuration of parameters === #
+params = {
+    'boosting_type': 'gbdt',
+    'objective': 'regression',
+    'metric': {'rmse'},
+    'num_leaves': 50,
+    'learning_rate': 0.03,
+    'feature_fraction': 1,
+    'bagging_fraction': 1,
+    'bagging_freq': 5,
+    'verbose': 0,
+    'max_depth': 10,
+    'min_gain_to_split': 0.0001
+}
+
+# Cross Validation
+print('Starting training...')
+gbm_cv = lgb.cv(params,
+                lgb_train,
+                num_boost_round=10000,
+                early_stopping_rounds=5,
+                nfold=10,
+                stratified=False,
+                seed=123,
+                categorical_feature=["day_week", "month_date", "Weekend"])
+best_round = len(gbm_cv['rmse-mean'])
+
+# Modelo con mejor rounds (best_rounds)
+gbm = lgb.train(params,
+                lgb_train,
+                num_boost_round=best_round,
+                valid_sets=lgb_eval,
+                early_stopping_rounds=5,
+                categorical_feature=["day_week", "month_date", "Weekend"])
+
+# === Predicciones === #
+print('Starting predict...')
+predichos = gbm.predict(data=df_testC.drop(["Place_ID_Date", "Date", "Place_ID"], axis = 1))
+predichos = np.exp(predichos)
+predichos
+
+# === Exportando predicciones === #  
+mi_array = {'Place_ID_Date': df_testC['Place_ID_Date'],
+            'target': predichos}
+          
+subm36 = pd.DataFrame(data = mi_array)
+subm36.to_csv('submissions/Subm36.csv', index = False, header=True)
+```
+
+## Subm 37
+
+```{python}
+# === Split data ==== #
+df_train3, df_test3 = train_test_split(df_trainC, test_size = 0.15, random_state = 123)
+
+# ==== Entrenamiendo de modelo ==== #
+y_train = np.log(df_train3["target"])
+y_test = np.log(df_test3["target"])
+X_train = df_train3.drop("target", axis=1)
+X_test = df_test3.drop("target", axis=1)
+
+# === Dataset lgb, igual que para XGBoost === #
+lgb_train = lgb.Dataset(X_train, y_train)
+lgb_eval = lgb.Dataset(X_test, y_test, reference=lgb_train)
+
+# === Configuration of parameters === #
+params = {
+    'boosting_type': 'gbdt',
+    'objective': 'regression',
+    'metric': {'rmse'},
+    'num_leaves': 80,
+    'learning_rate': 0.03,
+    'feature_fraction': 0.9,
+    'bagging_fraction': 0.9,
+    'bagging_freq': 5,
+    'verbose': 0,
+    'max_depth': 10,
+    'min_gain_to_split': 0.0001,
+    'max_bin': 400
+}
+
+# Cross Validation
+print('Starting training...')
+gbm_cv = lgb.cv(params,
+                lgb_train,
+                num_boost_round=10000,
+                early_stopping_rounds=5,
+                nfold=10,
+                stratified=False,
+                seed=123,
+                categorical_feature=["day_week", "month_date", "Weekend"])
+best_round = len(gbm_cv['rmse-mean'])
+
+# Modelo con mejor rounds (best_rounds)
+gbm = lgb.train(params,
+                lgb_train,
+                num_boost_round=best_round,
+                valid_sets=lgb_eval,
+                early_stopping_rounds=5,
+                categorical_feature=["day_week", "month_date", "Weekend"])
+
+# === Predicciones === #
+print('Starting predict...')
+predichos = gbm.predict(data=df_testC.drop(["Place_ID_Date", "Date", "Place_ID"], axis = 1))
+predichos = np.exp(predichos)
+predichos
+
+# === Exportando predicciones === #  
+mi_array = {'Place_ID_Date': df_testC['Place_ID_Date'],
+            'target': predichos}
+          
+subm37 = pd.DataFrame(data = mi_array)
+subm37.to_csv('submissions/Subm37.csv', index = False, header=True)
+```
+
+## Subm 38
+
+```{python}
+# === Split data ==== #
+df_train3, df_test3 = train_test_split(df_trainC, test_size = 0.15, random_state = 123)
+
+# ==== Entrenamiendo de modelo ==== #
+y_train = df_train3["target"]
+y_test = df_test3["target"]
+X_train = df_train3.drop("target", axis=1)
+X_test = df_test3.drop("target", axis=1)
+
+# === Dataset lgb, igual que para XGBoost === #
+lgb_train = lgb.Dataset(X_train, y_train)
+lgb_eval = lgb.Dataset(X_test, y_test, reference=lgb_train)
+
+# === Configuration of parameters === #
+params = {
+    'boosting_type': 'gbdt',
+    'objective': 'regression',
+    'metric': {'rmse'},
+    'num_leaves': 80,
+    'learning_rate': 0.005,
+    'feature_fraction': 1,
+    'bagging_fraction': 1,
+    'bagging_freq': 5,
+    'verbose': 0,
+    'max_depth': 10,
+    'min_gain_to_split': 0.0001,
+    'max_bin': 400
+}
+
+# Cross Validation
+print('Starting training...')
+gbm_cv = lgb.cv(params,
+                lgb_train,
+                num_boost_round=10000,
+                early_stopping_rounds=5,
+                nfold=10,
+                stratified=False,
+                seed=123,
+                categorical_feature=["day_week", "month_date", "Weekend"])
+best_round = len(gbm_cv['rmse-mean'])
+
+# Modelo con mejor rounds (best_rounds)
+gbm = lgb.train(params,
+                lgb_train,
+                num_boost_round=best_round,
+                valid_sets=lgb_eval,
+                early_stopping_rounds=5,
+                categorical_feature=["day_week", "month_date", "Weekend"])
+
+# === Predicciones === #
+print('Starting predict...')
+predichos = gbm.predict(data=df_testC.drop(["Place_ID_Date", "Date", "Place_ID"], axis = 1))
+predichos = predichos
+predichos
+
+# === Exportando predicciones === #  
+mi_array = {'Place_ID_Date': df_testC['Place_ID_Date'],
+            'target': predichos}
+          
+subm38 = pd.DataFrame(data = mi_array)
+subm38.to_csv('submissions/Subm38.csv', index = False, header=True)
+```
+
+## Subm 40
+
+```{python}
+# === Split data ==== #
+df_train3, df_test3 = train_test_split(df_trainC, test_size = 0.15, random_state = 123)
+
+# ==== Entrenamiendo de modelo ==== #
+y_train = df_train3["target"]
+y_test = df_test3["target"]
+X_train = df_train3.drop("target", axis=1)
+X_test = df_test3.drop("target", axis=1)
+
+# === Dataset lgb, igual que para XGBoost === #
+lgb_train = lgb.Dataset(X_train, y_train)
+lgb_eval = lgb.Dataset(X_test, y_test, reference=lgb_train)
+
+# === Configuration of parameters === #
+params = {
+    'boosting_type': 'gbdt',
+    'objective': 'regression',
+    'metric': {'rmse'},
+    'num_leaves': 80,
+    'learning_rate': 0.05,
+    'feature_fraction': 1,
+    'bagging_fraction': 1,
+    'bagging_freq': 5,
+    'verbose': 0,
+    'max_depth': 10,
+    'min_gain_to_split': 0.0001
+}
+
+# Cross Validation
+print('Starting training...')
+gbm_cv = lgb.cv(params,
+                lgb_train,
+                num_boost_round=10000,
+                early_stopping_rounds=5,
+                nfold=10,
+                stratified=False,
+                seed=123,
+                categorical_feature=["day_week", "month_date", "Weekend"])
+best_round = len(gbm_cv['rmse-mean'])
+
+# Modelo con mejor rounds (best_rounds)
+gbm = lgb.train(params,
+                lgb_train,
+                num_boost_round=best_round,
+                valid_sets=lgb_eval,
+                early_stopping_rounds=5,
+                categorical_feature=["day_week", "month_date", "Weekend"])
+
+# === Predicciones === #
+print('Starting predict...')
+predichos = gbm.predict(data=df_testC.drop(["Place_ID_Date", "Date", "Place_ID"], axis = 1))
+predichos = predichos
+predichos
+
+# === Exportando predicciones === #  
+mi_array = {'Place_ID_Date': df_testC['Place_ID_Date'],
+            'target': predichos}
+          
+subm40 = pd.DataFrame(data = mi_array)
+subm40.to_csv('submissions/Subm40.csv', index = False, header=True)
+```
+
