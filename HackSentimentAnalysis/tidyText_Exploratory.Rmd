@@ -1,0 +1,413 @@
+---
+title: "COVID-19 Tweet Classification Challenge by #ZindiWeekendz"
+author: "Sidereus (LB Private: 0.3319)"
+output:
+  html_notebook:
+    toc: true
+    highlight: breezedark
+    theme: flatly
+    toc_float:
+      smooth_scroll: false
+      collapsed: false
+---
+
+<center>
+<img src = "img/img1.png"/>
+</center>
+
+# Packages of R
+
+```{r}
+library(tidyverse)
+library(tidytext)
+library(wordcloud)
+library(jcolors)
+library(igraph)
+library(ggraph)
+library(quanteda)
+```
+
+# Impor data
+
+```{r}
+# Import data train, test and submission
+dataTrain <- read.csv("data/updated_train.csv")
+dataTest <- read.csv("data/updated_test.csv")
+dataSampleSubm <- read.csv("data/updated_ss.csv")
+```
+
+# Function for tokenization
+
+```{r}
+# Function clean text
+cleanText <- function(text){
+  
+  # Load library
+  suppressMessages(suppressWarnings(library(tm)))
+  
+  # Tokenize text
+  text = gsub("[[:cntrl:]]", " ", text)
+  text = tolower(text)
+  text = removePunctuation(text)
+  text = removeNumbers(text)
+  text = stripWhitespace(text)
+  text = removeWords(text, words = tm::stopwords(kind = "SMART"))
+  text = str_split(text, " ")[[1]]  
+  text = keep(.x = text, .p = function(x){str_length(x) > 2})
+  
+  # Return
+  return(text)
+}
+
+```
+
+# Tokenization
+
+```{r}
+# Tokenization
+library(tidyverse)
+library(tidytext)
+
+# Function cleanText() over dataframe
+tweetsTrain <- dataTrain %>% 
+  mutate(textTokenize = map(.x = text,
+                            .f = cleanText))
+head(tweetsTrain)
+```
+
+# Tidy format
+
+```{r}
+tweetsTrainTidy <- tweetsTrain %>%
+  select(-text) %>%
+  unnest(cols = textTokenize) %>% 
+  rename(token = textTokenize)
+head(tweetsTrainTidy)
+```
+
+# Exploratory
+
+## Total words by target
+
+```{r}
+tweetsTrainTidy %>% 
+  group_by(target) %>% 
+  count() %>% 
+  ggplot(data = ., aes(x = factor(target), y = n)) +
+  geom_col(color = "black") +
+  geom_label(aes(label = n)) +
+  labs(x = "Target")
+```
+
+## Different words by target
+
+```{r}
+tweetsTrainTidy %>%
+  select(target, token) %>%
+  distinct() %>%
+  group_by(target) %>%
+  summarise(wordsDifferents = n()) %>% 
+  ggplot(data = ., aes(x = factor(target), y = wordsDifferents)) +
+  geom_col(color = "black") +
+  geom_label(aes(label = wordsDifferents)) +
+  labs(x = "Target")
+```
+
+## Average length of tweets by target
+
+```{r}
+tweetsTrainTidy%>%
+  group_by(ID, target) %>%
+  summarise(lengthTweet = n()) %>% 
+  group_by(target) %>%
+  summarise(meanLength = mean(lengthTweet),
+            sdLength = sd(lengthTweet)) %>% 
+  ungroup() %>% 
+  ggplot(data = ., aes(x = factor(target), y = meanLength)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = meanLength - sdLength,
+                      ymax = meanLength + sdLength),
+                width = 0.1) +
+  labs(x = "Target",
+       y = "Length")
+```
+
+## Stop words manually
+
+```{r}
+# List stop words
+wordStop <- c('me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves',
+              'you','your', 'yours', 'yourself', 'yourselves', 'he', 'him','his',
+              'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself',
+              'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which',
+              'who', 'whom', 'this', 'that', 'these', 'those', 'am', 'is', 'are',
+              'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
+              'having', 'do', 'does', 'did', 'doing', 'a', 'an', 'the', 'and',
+              'but', 'if', 'or', 'because', 'as', 'until', 'while', 'of', 'at',
+              'by', 'for', 'with', 'about', 'against', 'between', 'into',
+              'through', 'during', 'before', 'after', 'above', 'below', 'to',
+              'from', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under',
+              'again', 'further', 'then', 'once', 'here', 'there', 'when',
+              'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more',
+              'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own',
+              'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will',
+              'just', 'don', 'should', 'now', 'd', 'll', 'm', 'o', 're', 've',
+              'y', 'ain', 'aren', 'couldn', 'didn', 'doesn', 'hadn', 'hasn',
+              'haven', 'isn', 'ma', 'mightn', 'mustn', 'needn', 'shan',
+              'shouldn', 'wasn', 'weren', 'won', 'wouldn','i', "amp", "new",
+              "com", "one")
+
+# Filtering stop words
+tweetsTrainTidy2 <- tweetsTrainTidy %>%
+  filter(!(token %in% wordStop))
+```
+
+## Most used words by target (top 50)
+
+```{r, fig.width=9, fig.height=8}
+tweetsTrainTidy2 %>% 
+  group_by(target, token) %>% 
+  count(token) %>%
+  group_by(target) %>%
+  top_n(50, n) %>% arrange(target, desc(n)) %>%
+  ggplot(aes(x = reorder(token, n), y = n, fill = factor(target))) +
+  facet_wrap(~target,scales = "free", ncol = 2) +
+  geom_col(color = "black") +
+  coord_flip()  +
+  theme(legend.position = "none") +
+  labs(y = "", x = "") +
+  scale_fill_jcolors(palette = "pal4")
+```
+
+## Wordcloud
+
+```{r, warning=FALSE, message=FALSE, fig.width=9, fig.height=9}
+wordcloudCustom <- function(target, data){
+  print(target)
+  wordcloud(words = data$token, freq = data$frequence,
+            max.words = 400, random.order = FALSE, rot.per = 0.35,
+            colors = jcolors(palette = "pal9"))
+}
+
+dfTarget <- tweetsTrainTidy2 %>%
+  group_by(target, token) %>%
+  count(token) %>%
+  group_by(target) %>%
+  mutate(frequence = n / n()) %>%
+  arrange(target, desc(frequence)) %>% nest() 
+
+walk2(.x = dfTarget$target, .y = dfTarget$data, .f = wordcloudCustom)
+```
+
+## Correlation between words
+
+```{r, message=FALSE, warning=FALSE}
+# Data spread
+tweetSpread <- tweetsTrainTidy2 %>%
+  group_by(target, token) %>%
+  count(token) %>%
+  spread(key = target, value = n, fill = NA, drop = TRUE)
+names(tweetSpread) <- c("Token", "NoCovid", "YesCovid")
+
+# Graphics
+tweetSpread %>% 
+  ggplot(data = ., aes(x = NoCovid, y = YesCovid)) +
+  geom_jitter(alpha = 0.1, size = 2.5, width = 0.25, height = 0.25) +
+  geom_text(aes(label = Token), check_overlap = TRUE, vjust = 1.5) +
+  scale_x_log10() +
+  scale_y_log10() +
+  geom_smooth(method = "lm", color = "darkred", se = FALSE)
+```
+
+## Common words by target
+
+```{r}
+wordsCommon <- intersect(tweetsTrainTidy2 %>%
+                           filter(target == 0) %>%
+                           select(token), tweetsTrainTidy2 %>%
+                           filter(target == 1) %>%
+                           select(token)) %>% nrow()
+cat("The number of common words between YesCovid and NoCovid is", wordsCommon)
+```
+
+## $n$-gram
+
+```{r}
+# Function cleanText without tokenize
+cleanText2 <- function(text){
+  
+  # Load library
+  suppressMessages(suppressWarnings(library(tm)))
+  
+  # Tokenize text
+  text = gsub("[[:cntrl:]]", " ", text)
+  text = tolower(text)
+  text = removePunctuation(text)
+  text = removeNumbers(text)
+  text = stripWhitespace(text)
+  text = removeWords(text, words = stopwords(kind = "SMART"))
+  
+  # Return
+  return(text)
+}
+
+# bigrams (two words)
+biGrams <- dataTrain %>%
+  mutate(textClean = cleanText2(text)) %>%
+  select(textClean) %>%
+  unnest_tokens(input = textClean, output = "bigram",
+                token = "ngrams", n = 2, drop = TRUE)
+
+# Count
+biGrams  %>%
+  count(bigram, sort = TRUE)
+```
+
+- **Separation of words:**
+
+```{r}
+bigramSeparate <- biGrams %>%
+  separate(bigram, c("word1", "word2"),
+           sep = " ")
+bigramSeparate
+```
+
+- **New count of words:**
+
+```{r}
+# Filtering any word within of list stop words mamually
+bigramSeparate2 <- bigramSeparate  %>%
+  filter(!word1 %in% wordStop) %>%
+  filter(!word2 %in% wordStop)
+
+# Join words
+bigramsJoin <- bigramSeparate2 %>%
+            unite(bigrams, word1, word2, sep = " ")
+
+# New count
+bigramsJoin %>% 
+  count(bigrams, sort = TRUE) %>% print(n = 20)
+```
+
+- **Network graphics (package `igraph`):**
+
+```{r, fig.width=9}
+graph <- bigramsJoin %>%
+  separate(bigrams, c("word1", "word2"), sep = " ") %>% 
+  count(word1, word2, sort = TRUE) %>%
+  filter(n >= 10) %>% 
+  graph_from_data_frame(directed = FALSE)
+set.seed(123)
+plot(graph, vertex.label.font = 2,
+     vertex.label.color = "black",
+     vertex.label.cex = 0.7, edge.color = "gray85")
+```
+
+# Modelling
+
+## Vectorization *tf-idf*
+
+- **Tweets train:**
+
+```{r}
+# Clean and tokenitzation tweets train
+dataTrain$text <- dataTrain$text %>%
+  map(.f = cleanText) %>%
+  map(.f = paste, collapse = " ") %>% unlist()
+
+# Document-term matrix 
+matrixTrain <- dfm(x = dataTrain$text, remove = wordStop)
+
+# Deleting terms less often 5
+matrixTrain2 <- dfm_trim(x = matrixTrain, min_docfreq = 5)
+
+# Values conversion to tfidf
+matrixTfidfTrain <- dfm_tfidf(matrixTrain2, scheme_tf = "prop",
+                              scheme_df = "inverse")
+```
+
+- **Tweets test:**
+
+```{r}
+# Test
+dataTest$text <- dataTest$text %>%
+  map(.f = cleanText) %>%
+  map(.f = paste, collapse = " ") %>% unlist()
+
+# Dimensions
+dimTrain <- matrixTfidfTrain@Dimnames$features
+
+# Dictionary to list
+dimTrain <- as.list(dimTrain)
+names(dimTrain) <- unlist(dimTrain)
+dimTrain <- dictionary(dimTrain)
+
+# Proyection documents
+matriz_tfidf_test <- dfm(x = dataTest$text,
+                         dictionary = dimTrain)
+matrixTfidfTest <- dfm_tfidf(matriz_tfidf_test, scheme_tf = "prop",
+                             scheme_df = "inverse")
+```
+
+## Model SVM Lineal
+
+```{r}
+library(e1071)
+modelSVM <- svm(x = matrixTfidfTrain, y = as.factor(dataTrain$target),
+                  kernel = "linear", cost = 1, scale = TRUE,
+                  type = "C-classification", probability = TRUE)
+modelSVM 
+```
+
+## Predictions test
+
+```{r}
+# Predictions test data
+predictTest <- predict(object = modelSVM,
+                       newdata = matrixTfidfTest,
+                       probability = TRUE)
+probTest <- as.data.frame(attr(predictTest, "probabilities"))
+```
+
+## Submission
+
+```{r}
+# Submission
+dataSampleSubm <- dataSampleSubm %>% 
+  select(ID) %>% 
+  cbind(probTest)
+write.csv(x = dataSampleSubm, file = "Submission/Subm7.csv", row.names = FALSE)
+```
+
+## Model SVM Radial
+
+```{r}
+modelSVM2 <- svm(x = matrixTfidfTrain, y = as.factor(dataTrain$target),
+                  kernel = "radial", cost = 1, scale = TRUE,
+                  type = "C-classification", probability = TRUE)
+modelSVM2 
+```
+
+## Predictions test
+
+```{r}
+# Predictions test data
+predictTest2 <- predict(object = modelSVM2,
+                       newdata = matrixTfidfTest,
+                       probability = TRUE)
+probTest2 <- as.data.frame(attr(predictTest2, "probabilities"))
+```
+
+## Submission
+
+```{r}
+# Submission
+dataSampleSubm2 <- dataSampleSubm %>% 
+  select(ID) %>% 
+  cbind(probTest2)
+write.csv(x = dataSampleSubm2, file = "Submission/Subm8.csv", row.names = FALSE)
+```
+
+# Acknowledgments
+
+- The entire document was based on the text mining tutorial from [Joaquin Amat Rodrigo.](https://joaquinamatrodrigo.github.io/documentos/38_Text_minig_con_R_ejemplo_practico_Twitter.html)
