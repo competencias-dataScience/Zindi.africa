@@ -15,3 +15,4 @@
   - **Hackatons:**
     - [Abandono de clientes en polizas de seguro.](https://zindi.africa/hackathons/the-zimnat-insurance-assurance-challenge)
     - [Clasificación de texto (COVID19) basada en tweets.](https://zindi.africa/hackathons/covid-19-tweet-classification-challenge)
+    - [Clasificación de imágenes (COVID19).](https://zindi.africa/competitions/zindiweekendz-learning-spot-the-mask-challenge)
